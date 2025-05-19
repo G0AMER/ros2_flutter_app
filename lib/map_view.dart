@@ -1,15 +1,15 @@
-// lib/map_view.dart
+// map_view.dart
 
 import 'dart:async';
 import 'dart:math';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'ros_service.dart';
 
-// TFTransform helper (unchanged)
+// Data class for TF transform
 class TFTransform {
   final double x, y, yaw;
   TFTransform(this.x, this.y, this.yaw);
+
   factory TFTransform.fromJson(Map j) {
     final t = j['transform'];
     final trans = t['translation'];
@@ -23,10 +23,13 @@ class TFTransform {
   }
 }
 
+enum MapMode { none, initPose, setGoal }
+
 class MapView extends StatefulWidget {
-  const MapView({super.key});
+  final MapMode mode;
+  const MapView({super.key, required this.mode});
   @override
-  _MapViewState createState() => _MapViewState();
+  State<MapView> createState() => _MapViewState();
 }
 
 class _MapViewState extends State<MapView> {
@@ -38,8 +41,10 @@ class _MapViewState extends State<MapView> {
   List<double> scanRanges = [];
   double scanAngleMin = 0, scanAngleInc = 0;
 
-  // For AMCL initializer
   Offset? initTap, dragPos;
+  double mapResolution = 0.05;
+  Offset mapOrigin = Offset.zero;
+  int mapWidth = 0, mapHeight = 0;
 
   StreamSubscription? mapSub, tfSub, planSub, goalSub, scanSub, amclSub;
 
@@ -52,12 +57,13 @@ class _MapViewState extends State<MapView> {
       final info = m['msg']['info'];
       final data = (m['msg']['data'] as List).cast<int>();
       setState(() {
+        mapResolution = info['resolution'];
+        mapOrigin = Offset(info['origin']['position']['x'], info['origin']['position']['y']);
+        mapWidth = info['width'];
+        mapHeight = info['height'];
         occupancyGrid = List.generate(
-          info['height'],
-          (r) => data.sublist(
-            r * info['width'] as int,
-            (r + 1) * info['width'] as int,
-          ),
+          mapHeight,
+              (r) => data.sublist(r * mapWidth, (r + 1) * mapWidth),
         );
       });
     });
@@ -72,17 +78,14 @@ class _MapViewState extends State<MapView> {
     planSub = ros.subscribe('/planned_path', 'nav_msgs/Path').listen((m) {
       final poses = (m['msg']['poses'] as List).cast<Map>();
       setState(() {
-        planPoints =
-            poses.map((p) {
-              final pos = p['pose']['position'];
-              return Offset(pos['x'], pos['y']);
-            }).toList();
+        planPoints = poses.map((p) {
+          final pos = p['pose']['position'];
+          return Offset(pos['x'], pos['y']);
+        }).toList();
       });
     });
 
-    goalSub = ros.subscribe('/goal_pose', 'geometry_msgs/PoseStamped').listen((
-      m,
-    ) {
+    goalSub = ros.subscribe('/goal_pose', 'geometry_msgs/PoseStamped').listen((m) {
       final p = m['msg']['pose']['position'];
       setState(() => goalPoint = Offset(p['x'], p['y']));
     });
@@ -95,12 +98,10 @@ class _MapViewState extends State<MapView> {
       });
     });
 
-    amclSub = ros
-        .subscribe('/amcl_pose', 'geometry_msgs/PoseWithCovarianceStamped')
-        .listen((m) {
-          final p = m['msg']['pose']['pose']['position'];
-          setState(() => robotPos = Offset(p['x'], p['y']));
-        });
+    amclSub = ros.subscribe('/amcl_pose', 'geometry_msgs/PoseWithCovarianceStamped').listen((m) {
+      final p = m['msg']['pose']['pose']['position'];
+      setState(() => robotPos = Offset(p['x'], p['y']));
+    });
   }
 
   @override
@@ -114,33 +115,63 @@ class _MapViewState extends State<MapView> {
     super.dispose();
   }
 
-  Offset screenToWorld(Offset p, Size s) => Offset(
-    (p.dx / s.width) * 10 - 5,
-    ((s.height - p.dy) / s.height) * 10 - 5,
-  );
-
   Offset worldToScreen(Offset w, Size s) {
-    return Offset(
-      (w.dx + 5) * s.width / 10,
-      s.height - (w.dy + 5) * s.height / 10,
-    );
+    final double sx = (w.dx - mapOrigin.dx) / mapResolution;
+    final double sy = (w.dy - mapOrigin.dy) / mapResolution;
+    return Offset(sx, mapHeight - sy) * (s.width / mapWidth);
+  }
+
+  Offset screenToWorld(Offset p, Size s) {
+    final scale = mapWidth / s.width;
+    final double mx = p.dx * scale;
+    final double my = (mapHeight - p.dy * scale);
+    return Offset(mx * mapResolution + mapOrigin.dx, my * mapResolution + mapOrigin.dy);
   }
 
   void _onTapDown(TapDownDetails d, Size s) {
-    setState(() {
-      initTap = screenToWorld(d.localPosition, s);
-      dragPos = null;
-    });
+    if (widget.mode == MapMode.initPose) {
+      setState(() {
+        initTap = screenToWorld(d.localPosition, s);
+        dragPos = null;
+      });
+    } else if (widget.mode == MapMode.setGoal) {
+      final world = screenToWorld(d.localPosition, s);
+      RosService().publish('/goal_pose', {
+        'header': {
+          'stamp': {
+            'sec': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+            'nanosec': (DateTime.now().millisecondsSinceEpoch % 1000) * 1000000
+          },
+          'frame_id': 'map'
+        },
+        'pose': {
+          'position': {'x': world.dx, 'y': world.dy, 'z': 0.0},
+          'orientation': {
+            'x': 0.0,
+            'y': 0.0,
+            'z': sin(0.0),
+            'w': cos(0.0),
+          }
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Nav goal set at (${world.dx.toStringAsFixed(2)}, ${world.dy.toStringAsFixed(2)})'),
+        ),
+      );
+    }
   }
 
   void _onPanUpdate(DragUpdateDetails d, Size s) {
-    setState(() {
-      dragPos = screenToWorld(d.localPosition, s);
-    });
+    if (widget.mode == MapMode.initPose) {
+      setState(() {
+        dragPos = screenToWorld(d.localPosition, s);
+      });
+    }
   }
 
   void _onPanEnd(Size s) {
-    if (initTap != null && dragPos != null) {
+    if (widget.mode == MapMode.initPose && initTap != null && dragPos != null) {
       final dx = dragPos!.dx - initTap!.dx;
       final dy = dragPos!.dy - initTap!.dy;
       final yaw = atan2(dy, dx);
@@ -154,42 +185,38 @@ class _MapViewState extends State<MapView> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Expanded(
-          child: InteractiveViewer(
-            constrained: true,
-            boundaryMargin: EdgeInsets.all(double.infinity),
-            minScale: 0.1,
-            maxScale: 10,
-            child: LayoutBuilder(
-              builder: (ctx, cons) {
-                return GestureDetector(
-                  onTapDown: (d) => _onTapDown(d, cons.biggest),
-                  onPanUpdate: (d) => _onPanUpdate(d, cons.biggest),
-                  onPanEnd: (_) => _onPanEnd(cons.biggest),
-                  child: CustomPaint(
-                    size: cons.biggest,
-                    painter: _MapPainter(
-                      occupancyGrid: occupancyGrid,
-                      transforms: transforms,
-                      planPoints: planPoints,
-                      goalPoint: goalPoint,
-                      robot: robotPos,
-                      scanRanges: scanRanges,
-                      scanAngleMin: scanAngleMin,
-                      scanAngleInc: scanAngleInc,
-                      initTap: initTap,
-                      dragPos: dragPos,
-                      worldToScreen: (w) => worldToScreen(w, cons.biggest),
-                    ),
-                  ),
-                );
-              },
+    return Expanded(
+      child: InteractiveViewer(
+        constrained: true,
+        boundaryMargin: const EdgeInsets.all(double.infinity),
+        panEnabled: widget.mode == MapMode.none,
+        scaleEnabled: widget.mode == MapMode.none,
+        minScale: 0.1,
+        maxScale: 10,
+        child: LayoutBuilder(builder: (ctx, cons) {
+          return GestureDetector(
+            onTapDown: (d) => _onTapDown(d, cons.biggest),
+            onPanUpdate: (d) => _onPanUpdate(d, cons.biggest),
+            onPanEnd: (_) => _onPanEnd(cons.biggest),
+            child: CustomPaint(
+              size: cons.biggest,
+              painter: _MapPainter(
+                occupancyGrid: occupancyGrid,
+                transforms: transforms,
+                planPoints: planPoints,
+                goalPoint: goalPoint,
+                robot: robotPos,
+                scanRanges: scanRanges,
+                scanAngleMin: scanAngleMin,
+                scanAngleInc: scanAngleInc,
+                initTap: initTap,
+                dragPos: dragPos,
+                worldToScreen: (w) => worldToScreen(w, cons.biggest),
+              ),
             ),
-          ),
-        ),
-      ],
+          );
+        }),
+      ),
     );
   }
 }
@@ -221,147 +248,94 @@ class _MapPainter extends CustomPainter {
 
   @override
   void paint(Canvas c, Size s) {
-    // 1) Occupancy grid
+    final paintOcc = Paint();
     final rows = occupancyGrid.length;
     final cols = rows > 0 ? occupancyGrid[0].length : 0;
     final cellW = s.width / cols;
     final cellH = s.height / rows;
-    final paintOcc = Paint();
     for (int r = 0; r < rows; r++) {
       for (int j = 0; j < cols; j++) {
         final v = occupancyGrid[r][j];
-        paintOcc.color =
-            v == 0 ? Colors.white : (v < 0 ? Colors.grey : Colors.black);
+        paintOcc.color = v == 0 ? Colors.white : (v < 0 ? Colors.grey : Colors.black);
         c.drawRect(Rect.fromLTWH(j * cellW, r * cellH, cellW, cellH), paintOcc);
       }
     }
 
-    // 2) Laser scan, clipped to canvas
-    final scanPaint =
-        Paint()
-          ..color = Colors.orange.withOpacity(0.5)
-          ..strokeWidth = 1;
-    final Rect bounds = Offset.zero & s;
+    final bounds = Offset.zero & s;
+    final scanPaint = Paint()
+      ..color = Colors.orange.withOpacity(0.6)
+      ..strokeWidth = 1;
     for (int i = 0; i < scanRanges.length; i++) {
       final ang = scanAngleMin + i * scanAngleInc;
-      final r = scanRanges[i];
-      // raw endpoint
-      Offset end = robot + Offset(r * cos(ang), r * sin(ang));
-      // convert to screen
-      Offset p1 = worldToScreen(robot);
-      Offset p2 = worldToScreen(end);
-      // clip line to bounds
-      final clipped = _clipLine(bounds, p1, p2);
-      if (clipped != null) {
-        c.drawLine(clipped.item1, clipped.item2, scanPaint);
-      }
+      final dist = scanRanges[i];
+      final end = robot + Offset(dist * cos(ang), dist * sin(ang));
+      final p1 = worldToScreen(robot);
+      final p2 = worldToScreen(end);
+      final clip = _clipLine(bounds, p1, p2);
+      if (clip != null) c.drawLine(clip.item1, clip.item2, scanPaint);
     }
 
-    // 3) Planned path
-    final pathPaint =
-        Paint()
-          ..color = Colors.blue
-          ..strokeWidth = 3;
+    final pathPaint = Paint()..color = Colors.blue..strokeWidth = 2;
     for (int i = 0; i + 1 < planPoints.length; i++) {
-      c.drawLine(
-        worldToScreen(planPoints[i]),
-        worldToScreen(planPoints[i + 1]),
-        pathPaint,
-      );
+      c.drawLine(worldToScreen(planPoints[i]), worldToScreen(planPoints[i + 1]), pathPaint);
     }
 
-    // 4) Goal marker
     if (goalPoint != null) {
-      c.drawCircle(worldToScreen(goalPoint!), 8, Paint()..color = Colors.green);
+      c.drawCircle(worldToScreen(goalPoint!), 7, Paint()..color = Colors.green);
     }
 
-    // 5) TF frames
     for (var tf in transforms) {
-      final origin = worldToScreen(Offset(tf.x, tf.y));
-      final xend = worldToScreen(
-        Offset(tf.x + cos(tf.yaw) * 0.5, tf.y + sin(tf.yaw) * 0.5),
-      );
-      final yend = worldToScreen(
-        Offset(tf.x - sin(tf.yaw) * 0.5, tf.y + cos(tf.yaw) * 0.5),
-      );
-      c.drawLine(
-        origin,
-        xend,
-        Paint()
-          ..color = Colors.red
-          ..strokeWidth = 2,
-      );
-      c.drawLine(
-        origin,
-        yend,
-        Paint()
-          ..color = Colors.green
-          ..strokeWidth = 2,
-      );
+      final o = worldToScreen(Offset(tf.x, tf.y));
+      final xAxis = worldToScreen(Offset(tf.x + cos(tf.yaw) * 0.4, tf.y + sin(tf.yaw) * 0.4));
+      final yAxis = worldToScreen(Offset(tf.x - sin(tf.yaw) * 0.4, tf.y + cos(tf.yaw) * 0.4));
+      c.drawLine(o, xAxis, Paint()..color = Colors.red..strokeWidth = 2);
+      c.drawLine(o, yAxis, Paint()..color = Colors.green..strokeWidth = 2);
     }
 
-    // 6) AMCL initializer crosshair & arrow
-    final initPaint =
-        Paint()
-          ..color = Colors.green
-          ..strokeWidth = 2;
     if (initTap != null) {
       final p = worldToScreen(initTap!);
-      c.drawLine(p + Offset(-10, 0), p + Offset(10, 0), initPaint);
-      c.drawLine(p + Offset(0, -10), p + Offset(0, 10), initPaint);
+      final initPaint = Paint()..color = Colors.green..strokeWidth = 2;
+      c.drawLine(p + const Offset(-10, 0), p + const Offset(10, 0), initPaint);
+      c.drawLine(p + const Offset(0, -10), p + const Offset(0, 10), initPaint);
     }
     if (initTap != null && dragPos != null) {
       final p1 = worldToScreen(initTap!);
       final p2 = worldToScreen(dragPos!);
+      final initPaint = Paint()..color = Colors.green..strokeWidth = 2;
       c.drawLine(p1, p2, initPaint);
-      final ang = (p2 - p1).direction;
-      const head = 8.0;
-      final left = p2 + Offset.fromDirection(ang + pi * 3 / 4, head);
-      final right = p2 + Offset.fromDirection(ang - pi * 3 / 4, head);
+      final dir = (p2 - p1).direction;
+      final head = 8.0;
+      final left = p2 + Offset.fromDirection(dir + pi * 3 / 4, head);
+      final right = p2 + Offset.fromDirection(dir - pi * 3 / 4, head);
       c.drawLine(p2, left, initPaint);
       c.drawLine(p2, right, initPaint);
     }
 
-    // 7) Robot pose
     c.drawCircle(worldToScreen(robot), 6, Paint()..color = Colors.red);
   }
 
-  /// Cohen–Sutherland or Liang–Barsky would be ideal, but for simplicity:
-  /// Clip by simply clamping endpoints to bounds rectangle.
-  /// Returns a tuple of clipped points if at least one end was inside originally.
-  Tuple2<Offset, Offset>? _clipLine(Rect bounds, Offset a, Offset b) {
-    // If both points are outside on the same side, skip
-    if (!_pointInOrOn(bounds, a) && !_pointInOrOn(bounds, b)) {
-      return null;
-    }
-    // Clamp each point
-    Offset ca = Offset(
-      a.dx.clamp(bounds.left, bounds.right),
-      a.dy.clamp(bounds.top, bounds.bottom),
-    );
-    Offset cb = Offset(
-      b.dx.clamp(bounds.left, bounds.right),
-      b.dy.clamp(bounds.top, bounds.bottom),
-    );
+  Tuple2<Offset, Offset>? _clipLine(Rect b, Offset a, Offset c2) {
+    if (!_inside(b, a) && !_inside(b, c2)) return null;
+    final ca = Offset(a.dx.clamp(b.left, b.right), a.dy.clamp(b.top, b.bottom));
+    final cb = Offset(c2.dx.clamp(b.left, b.right), c2.dy.clamp(b.top, b.bottom));
     return Tuple2(ca, cb);
   }
 
-  bool _pointInOrOn(Rect r, Offset p) =>
+  bool _inside(Rect r, Offset p) =>
       p.dx >= r.left && p.dx <= r.right && p.dy >= r.top && p.dy <= r.bottom;
 
   @override
-  bool shouldRepaint(covariant _MapPainter o) =>
-      o.occupancyGrid != occupancyGrid ||
-      o.transforms != transforms ||
-      o.planPoints != planPoints ||
-      o.goalPoint != goalPoint ||
-      o.robot != robot ||
-      o.scanRanges != scanRanges ||
-      o.initTap != initTap ||
-      o.dragPos != dragPos;
+  bool shouldRepaint(covariant _MapPainter old) =>
+      occupancyGrid != old.occupancyGrid ||
+          transforms != old.transforms ||
+          planPoints != old.planPoints ||
+          goalPoint != old.goalPoint ||
+          robot != old.robot ||
+          scanRanges != old.scanRanges ||
+          initTap != old.initTap ||
+          dragPos != old.dragPos;
 }
 
-/// Simple tuple since Flutter lacks one
 class Tuple2<A, B> {
   final A item1;
   final B item2;
