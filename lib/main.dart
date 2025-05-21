@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:ros2_flutter_app/ros_service.dart';
 import 'map_view.dart';
+import 'ros_service.dart';
 
 
 void main() {
@@ -16,6 +16,7 @@ class MyApp extends StatelessWidget {
     return ChangeNotifierProvider(
       create: (_) => RosModel(),
       child: MaterialApp(
+        debugShowCheckedModeBanner: false,
         title: 'ROS2 Robot Visualizer',
         theme: ThemeData(primarySwatch: Colors.blue),
         home: const RobotVisualizerScreen(),

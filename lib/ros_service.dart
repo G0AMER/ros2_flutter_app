@@ -5,7 +5,9 @@ import 'package:flutter/cupertino.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 class RosService {
   static final RosService _instance = RosService._internal();
+
   factory RosService() => _instance;
+
   RosService._internal();
 
   WebSocketChannel? _channel;
@@ -35,7 +37,8 @@ class RosService {
     _channel!.sink.add(
       jsonEncode({'op': 'subscribe', 'topic': topic, 'type': type}),
     );
-    final stream = _broadcastStream!
+    final stream =
+    _broadcastStream!
         .map((m) {
       try {
         return jsonDecode(m as String) as Map<String, dynamic>;
@@ -116,7 +119,12 @@ class RosService {
         },
       },
     };
-    publish('/move_base_simple/goal', msg);
+    publish('/goal_pose', msg);
+  }
+
+  void publishSearchTargetId(int id) {
+    final msg = {'data': id};
+    publish('/search_target_id', msg);
   }
 
   void dispose() {
@@ -130,10 +138,12 @@ class RosModel extends ChangeNotifier {
   final RosService _rosService = RosService();
   Map<String, dynamic>? robotPose;
   Map<String, dynamic>? mapData;
-  List<dynamic>? scanData;
+  Map<String, dynamic>? scanData;
   bool isConnected = false;
   String mode = 'view'; // 'view', 'initial_pose', 'goal_pose'
   String? connectionError;
+  int? selectedTargetId;
+  List<Map<String, dynamic>> path = [];
 
   RosModel() {
     connect();
@@ -192,7 +202,9 @@ class RosModel extends ChangeNotifier {
         },
       );
 
-      _rosService.subscribe('/map', 'nav_msgs/OccupancyGrid').listen(
+      _rosService
+          .subscribe('/map', 'nav_msgs/OccupancyGrid')
+          .listen(
             (msg) {
           mapData = msg['msg'];
           notifyListeners();
@@ -203,9 +215,26 @@ class RosModel extends ChangeNotifier {
         },
       );
 
-      _rosService.subscribe('/scan', 'sensor_msgs/LaserScan').listen(
+      _rosService
+          .subscribe('/scan', 'sensor_msgs/LaserScan')
+          .listen(
             (msg) {
-          scanData = msg['msg']['ranges'];
+          scanData = msg['msg'];
+          notifyListeners();
+        },
+        onError: (e) {
+          connectionError = e.toString();
+          notifyListeners();
+        },
+      );
+
+      _rosService
+          .subscribe('/search_order', 'nav_msgs/Path')
+          .listen(
+            (msg) {
+          path =
+              (msg['msg']['poses'] as List<dynamic>)
+                  .cast<Map<String, dynamic>>();
           notifyListeners();
         },
         onError: (e) {
@@ -232,6 +261,12 @@ class RosModel extends ChangeNotifier {
 
   void setGoalPose(double x, double y, double yaw) {
     _rosService.publishGoalPose(x: x, y: y, yaw: yaw);
+  }
+
+  void setSearchTargetId(int id) {
+    selectedTargetId = id;
+    _rosService.publishSearchTargetId(id);
+    notifyListeners();
   }
 
   @override
