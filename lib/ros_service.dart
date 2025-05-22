@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+
 class RosService {
   static final RosService _instance = RosService._internal();
 
@@ -144,6 +145,9 @@ class RosModel extends ChangeNotifier {
   String? connectionError;
   int? selectedTargetId;
   List<Map<String, dynamic>> path = [];
+
+  // Add a public getter for _rosService
+  RosService get rosService => _rosService;
 
   RosModel() {
     connect();

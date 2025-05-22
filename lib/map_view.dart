@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ros2_flutter_app/ros_service.dart';
+import 'isFound.dart'; // Import the search_status.dart file
 
 class RobotVisualizerScreen extends StatelessWidget {
   const RobotVisualizerScreen({super.key});
@@ -11,17 +12,18 @@ class RobotVisualizerScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('ROS2 Robot Visualizer')),
-      body: Consumer<RosModel>(
-        builder: (context, model, child) {
-          return Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: DropdownButton<int>(
-                  hint: const Text('Select Target Class'),
-                  value: model.selectedTargetId,
-                  items:
-                      const [
+      body: Stack( // Use Stack to layer SearchStatusWidget without affecting layout
+        children: [
+          Consumer<RosModel>(
+            builder: (context, model, child) {
+              return Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: DropdownButton<int>(
+                      hint: const Text('Select Target Class'),
+                      value: model.selectedTargetId,
+                      items: const [
                         'person',
                         'bicycle',
                         'car',
@@ -110,86 +112,85 @@ class RobotVisualizerScreen extends StatelessWidget {
                           child: Text(label),
                         );
                       }).toList(),
-                  onChanged: (int? newValue) {
-                    if (newValue != null) {
-                      model.setSearchTargetId(newValue);
-                    }
-                  },
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    ElevatedButton(
-                      onPressed: () => model.setMode('view'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor:
+                      onChanged: (int? newValue) {
+                        if (newValue != null) {
+                          model.setSearchTargetId(newValue);
+                        }
+                      },
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        ElevatedButton(
+                          onPressed: () => model.setMode('view'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor:
                             model.mode == 'view' ? Colors.blue : null,
-                      ),
-                      child: const Text('View'),
-                    ),
-                    ElevatedButton(
-                      onPressed: () => model.setMode('initial_pose'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor:
+                          ),
+                          child: const Text('View'),
+                        ),
+                        ElevatedButton(
+                          onPressed: () => model.setMode('initial_pose'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor:
                             model.mode == 'initial_pose' ? Colors.blue : null,
-                      ),
-                      child: const Text('Set Initial Pose'),
+                          ),
+                          child: const Text('Set Initial Pose'),
+                        ),
+                      ],
                     ),
-                    ElevatedButton(
-                      onPressed: () => model.setMode('goal_pose'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor:
-                            model.mode == 'goal_pose' ? Colors.blue : null,
-                      ),
-                      child: const Text('Set Goal Pose'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => model.setMode('goal_pose'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor:
+                      model.mode == 'goal_pose' ? Colors.blue : null,
                     ),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Text(
-                  model.isConnected
-                      ? 'Connected to ROS2'
-                      : 'Disconnected: ${model.connectionError ?? "Unknown error"}',
-                  style: TextStyle(
-                    color: model.isConnected ? Colors.green : Colors.red,
+                    child: const Text('Set Goal Pose'),
                   ),
-                ),
-              ),
-              if (model.robotPose != null)
-                Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Text(
-                    'Robot Pose: x=${model.robotPose!['position']['x'].toStringAsFixed(4)}, '
-                    'y=${model.robotPose!['position']['y'].toStringAsFixed(4)}, '
-                    'yaw=${(2 * math.atan2(model.robotPose!['orientation']['z'], model.robotPose!['orientation']['w'])).toStringAsFixed(4)} rad',
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Text(
+                      model.isConnected
+                          ? 'Connected to ROS2'
+                          : 'Disconnected: ${model.connectionError ?? "Unknown error"}',
+                      style: TextStyle(
+                        color: model.isConnected ? Colors.green : Colors.red,
+                      ),
+                    ),
                   ),
-                ),
-              Expanded(
-                child: SizedBox(
-                  height: MediaQuery.of(context).size.height * 0.6,
-                  child: SingleChildScrollView(
-                    child: InteractiveViewer(
-                      constrained: true,
-                      boundaryMargin: const EdgeInsets.all(1000),
-                      minScale: 0.1,
-                      maxScale: 4.0,
-                      child: MapWidget(
-                        pose: model.robotPose,
-                        mapData: model.mapData,
-                        scanData: model.scanData,
-                        path: model.path,
-                        isConnected: model.isConnected,
-                        mode: model.mode,
-                        onPoseSet: (x, y, yaw) {
-                          showDialog(
-                            context: context,
-                            builder:
-                                (context) => AlertDialog(
+                  if (model.robotPose != null)
+                    Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: Text(
+                        'Robot Pose: x=${model.robotPose!['position']['x'].toStringAsFixed(4)}, '
+                            'y=${model.robotPose!['position']['y'].toStringAsFixed(4)}, '
+                            'yaw=${(2 * math.atan2(model.robotPose!['orientation']['z'], model.robotPose!['orientation']['w'])).toStringAsFixed(4)} rad',
+                      ),
+                    ),
+                  Expanded(
+                    child: SizedBox(
+                      height: MediaQuery.of(context).size.height * 0.6,
+                      child: SingleChildScrollView(
+                        child: InteractiveViewer(
+                          constrained: true,
+                          boundaryMargin: const EdgeInsets.all(1000),
+                          minScale: 0.1,
+                          maxScale: 4.0,
+                          child: MapWidget(
+                            pose: model.robotPose,
+                            mapData: model.mapData,
+                            scanData: model.scanData,
+                            path: model.path,
+                            isConnected: model.isConnected,
+                            mode: model.mode,
+                            onPoseSet: (x, y, yaw) {
+                              showDialog(
+                                context: context,
+                                builder: (context) => AlertDialog(
                                   title: Text(
                                     model.mode == 'initial_pose'
                                         ? 'Confirm Initial Pose'
@@ -216,16 +217,19 @@ class RobotVisualizerScreen extends StatelessWidget {
                                     ),
                                   ],
                                 ),
-                          );
-                        },
+                              );
+                            },
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ),
-            ],
-          );
-        },
+                ],
+              );
+            },
+          ),
+          const SearchStatusWidget(), // Add SearchStatusWidget to the stack
+        ],
       ),
     );
   }
@@ -300,14 +304,14 @@ class _MapWidgetState extends State<MapWidget> {
           // Convert canvas coordinates to map coordinates (inverted y-axis)
           final mapX =
               (tapPosition!.dx - mapPainter.canvasOrigin.dx) / scale +
-              mapPainter.minX;
+                  mapPainter.minX;
           final mapY =
               -((tapPosition!.dy - mapPainter.canvasOrigin.dy) / scale) +
-              mapPainter.maxY;
+                  mapPainter.maxY;
           final dx = (dragPosition!.dx - tapPosition!.dx) / scale;
           final dy =
-              -((dragPosition!.dy - tapPosition!.dy) /
-                  scale); // Invert y direction for yaw
+          -((dragPosition!.dy - tapPosition!.dy) /
+              scale); // Invert y direction for yaw
           final yaw = math.atan2(dy, dx);
 
           widget.onPoseSet(mapX, mapY, yaw);
@@ -393,9 +397,9 @@ class MapPainter extends CustomPainter {
       final robotX = pose!['position']['x'] as double;
       final robotY = pose!['position']['y'] as double;
       final ranges =
-          (scanData!['ranges'] as List<dynamic>)
-              .map((r) => r as double)
-              .toList();
+      (scanData!['ranges'] as List<dynamic>)
+          .map((r) => r as double)
+          .toList();
       final angleMin = scanData!['angle_min'] as double;
       final angleMax = scanData!['angle_max'] as double;
       final angleIncrement = scanData!['angle_increment'] as double;
@@ -453,9 +457,9 @@ class MapPainter extends CustomPainter {
 
     // Draw orthonormal grid in meters (inverted y-axis)
     final gridPaint =
-        Paint()
-          ..color = Colors.grey.withOpacity(0.2)
-          ..strokeWidth = 1;
+    Paint()
+      ..color = Colors.grey.withOpacity(0.2)
+      ..strokeWidth = 1;
     final textPaint = TextPainter(
       textDirection: TextDirection.ltr,
       textAlign: TextAlign.center,
@@ -538,29 +542,29 @@ class MapPainter extends CustomPainter {
     // Draw path
     if (path.isNotEmpty) {
       final pathPaint =
-          Paint()
-            ..color = Colors.yellow
-            ..strokeWidth = 2
-            ..style = PaintingStyle.stroke;
+      Paint()
+        ..color = Colors.yellow
+        ..strokeWidth = 2
+        ..style = PaintingStyle.stroke;
 
       final pathPoints =
-          path.map((pose) {
-            final x = sanitizeValue(pose['pose']['position']['x'] as double);
-            final y = sanitizeValue(pose['pose']['position']['y'] as double);
-            final canvasX = canvasOrigin.dx + (x - minX) * pixelsPerMeter;
-            final canvasY = canvasOrigin.dy + (maxY - y) * pixelsPerMeter;
-            return Offset(canvasX, canvasY);
-          }).toList();
+      path.map((pose) {
+        final x = sanitizeValue(pose['pose']['position']['x'] as double);
+        final y = sanitizeValue(pose['pose']['position']['y'] as double);
+        final canvasX = canvasOrigin.dx + (x - minX) * pixelsPerMeter;
+        final canvasY = canvasOrigin.dy + (maxY - y) * pixelsPerMeter;
+        return Offset(canvasX, canvasY);
+      }).toList();
 
-      for (int i = 0; i < pathPoints.length - 1; i++) {
+      /*for (int i = 0; i < pathPoints.length - 1; i++) {
         canvas.drawLine(pathPoints[i], pathPoints[i + 1], pathPaint);
-      }
+      }*/
 
       // Draw waypoints as small circles
       final waypointPaint =
-          Paint()
-            ..color = Colors.yellow
-            ..style = PaintingStyle.fill;
+      Paint()
+        ..color = Colors.yellow
+        ..style = PaintingStyle.fill;
       for (final point in pathPoints) {
         canvas.drawCircle(point, 3.0, waypointPaint);
       }
@@ -577,32 +581,32 @@ class MapPainter extends CustomPainter {
 
       // Calculate yaw from quaternion
       final robotYaw =
-          -math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz));
+      -math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz));
 
       final robotPaint =
-          Paint()
-            ..color = Colors.blue
-            ..strokeWidth = 2;
+      Paint()
+        ..color = Colors.blue
+        ..strokeWidth = 5;
       canvas.save();
       final canvasX = canvasOrigin.dx + (x - minX) * pixelsPerMeter;
       final canvasY = canvasOrigin.dy + (maxY - y) * pixelsPerMeter;
       canvas.translate(canvasX, canvasY);
       canvas.rotate(robotYaw);
       final path =
-          Path()
-            ..moveTo(0, 0)
-            ..lineTo(-10, 5) // Base of triangle
-            ..lineTo(-10, -5)
-            ..close();
+      Path()
+        ..moveTo(0, 0)
+        ..lineTo(-15, 5) // Base of triangle
+        ..lineTo(-15, -5)
+        ..close();
       canvas.drawPath(path, robotPaint);
       canvas.restore();
 
       // Draw laser scan with static transform offset
       if (scanData != null) {
         final ranges =
-            (scanData!['ranges'] as List<dynamic>)
-                .map((r) => r as double)
-                .toList();
+        (scanData!['ranges'] as List<dynamic>)
+            .map((r) => r as double)
+            .toList();
         final angleMin = scanData!['angle_min'] as double;
         final angleMax = scanData!['angle_max'] as double;
         final angleIncrement = scanData!['angle_increment'] as double;
@@ -611,9 +615,9 @@ class MapPainter extends CustomPainter {
         final frameId = scanData!['header']['frame_id'] as String?;
 
         final scanPaint =
-            Paint()
-              ..color = Colors.red
-              ..strokeWidth = 0.1;
+        Paint()
+          ..color = Colors.red
+          ..strokeWidth = 0.1;
 
         for (int i = 0; i < ranges.length; i++) {
           final range = sanitizeValue(ranges[i]);
@@ -621,8 +625,8 @@ class MapPainter extends CustomPainter {
             final relativeAngle = angleMin + i * angleIncrement;
             final globalAngle =
                 robotYaw +
-                relativeAngle +
-                laserYawOffset; // Apply static yaw offset
+                    relativeAngle +
+                    laserYawOffset; // Apply static yaw offset
             final scanX = x + range * math.cos(globalAngle);
             final scanY = y + range * math.sin(globalAngle);
             final scanCanvasX =
@@ -648,10 +652,10 @@ class MapPainter extends CustomPainter {
     // Draw pose setting arrow (inverted y-axis affects user input)
     if (tapPosition != null && dragPosition != null && mode != 'view') {
       final arrowPaint =
-          Paint()
-            ..color = mode == 'initial_pose' ? Colors.green : Colors.red
-            ..strokeWidth = 2
-            ..style = PaintingStyle.stroke;
+      Paint()
+        ..color = mode == 'initial_pose' ? Colors.green : Colors.red
+        ..strokeWidth = 2
+        ..style = PaintingStyle.stroke;
 
       final path = Path();
       final start = tapPosition!;
@@ -683,11 +687,11 @@ class MapPainter extends CustomPainter {
       canvas.translate(end.dx, end.dy);
       canvas.rotate(math.atan2(end.dy - start.dy, end.dx - start.dx));
       final arrowHead =
-          Path()
-            ..moveTo(0, 0)
-            ..lineTo(-5, 3)
-            ..lineTo(-5, -3)
-            ..close();
+      Path()
+        ..moveTo(0, 0)
+        ..lineTo(-5, 3)
+        ..lineTo(-5, -3)
+        ..close();
       canvas.drawPath(arrowHead, arrowPaint..style = PaintingStyle.fill);
       canvas.restore();
     }
@@ -728,9 +732,9 @@ class MapPainter extends CustomPainter {
       final robotX = pose!['position']['x'] as double;
       final robotY = pose!['position']['y'] as double;
       final ranges =
-          (scanData!['ranges'] as List<dynamic>)
-              .map((r) => r as double)
-              .toList();
+      (scanData!['ranges'] as List<dynamic>)
+          .map((r) => r as double)
+          .toList();
       final angleMin = scanData!['angle_min'] as double;
       final angleMax = scanData!['angle_max'] as double;
       final angleIncrement = scanData!['angle_increment'] as double;
